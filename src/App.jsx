@@ -1,5 +1,5 @@
 // src/App.jsx
-// Script Version: v1.0.24 (Ruta a Perfil Añadida)
+// Script Version: v1.0.28 (Funciones completas, modal y props para ProfilePage)
 import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
@@ -10,14 +10,13 @@ import {
     onSnapshot, orderBy, serverTimestamp, doc, updateDoc, deleteDoc,
     runTransaction 
 } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-firestore.js";
-// --- Importaciones de Firebase Auth ---
 import { 
     getAuth, 
     onAuthStateChanged, 
     createUserWithEmailAndPassword, 
     signInWithEmailAndPassword, 
     signOut as firebaseSignOut,
-    updateProfile // Necesario si ProfilePage lo usa y no lo importa directamente
+    updateProfile 
 } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-auth.js";
 
 
@@ -34,10 +33,10 @@ import AddCategoryModal from './components/modals/AddCategoryModal';
 import LoginPage from './components/pages/auth/LoginPage'; 
 import RegisterPage from './components/pages/auth/RegisterPage'; 
 import ProtectedRoute from './components/ProtectedRoute'; 
-import ProfilePage from './components/pages/ProfilePage'; // <--- AÑADIDA IMPORTACIÓN
+import ProfilePage from './components/pages/ProfilePage';
 
 
-// --- CONFIGURACIÓN DE FIREBASE ---
+// --- CONFIGURACIÓN DE FIREBASE Y CLOUDINARY ---
 const firebaseConfig = {
     apiKey: "AIzaSyA3h18FkkRo6V4i6bsHDof2s5NOeiQJUiE",
     authDomain: "tecnostorage-8342a.firebaseapp.com",
@@ -50,6 +49,8 @@ const firebaseConfig = {
 const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const CLOUDINARY_CLOUD_NAME = 'dgqbwrgot'; 
 const CLOUDINARY_UPLOAD_PRESET = 'gestor_productos_unsigned';
+const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+
 
 // --- INICIALIZACIÓN DE FIREBASE ---
 const fbApp = initializeApp(firebaseConfig);
@@ -70,85 +71,57 @@ function AppContent() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
   const [stockMovements, setStockMovements] = useState([]);
   const [isLoadingMovements, setIsLoadingMovements] = useState(true);
-  
-  // Estados de Autenticación
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true); 
 
-  useEffect(() => { /* Loader HTML */ 
+  const showGenericMessageModal = (title, text, actions = []) => setModalMessage({ title, text, isOpen: true, actions });
+  const closeGenericMessageModal = () => setModalMessage({ title: '', text: '', isOpen: false, actions: [] });
+
+  useEffect(() => { 
     const loaderElement = document.getElementById('loader');
-    if (loaderElement) {
-      loaderElement.classList.add('loader-hidden');
-    }
+    if (loaderElement) loaderElement.classList.add('loader-hidden');
   }, []);
-  useEffect(() => { /* Tema */ 
+
+  useEffect(() => { 
     document.body.className = ''; 
-    if (currentTheme === 'light') {
-      document.body.classList.add('light-mode');
-    }
+    if (currentTheme === 'light') document.body.classList.add('light-mode');
     localStorage.setItem('theme', currentTheme);
   }, [currentTheme]);
 
-  useEffect(() => { /* Categorías */ 
-    const categoriesCollectionRef = collection(db, `artifacts/${canvasAppId}/categories`);
-    const q = query(categoriesCollectionRef, orderBy("name"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        setCategories(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
-    }, (error) => {
-        console.error("Error al cargar categorías:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar las categorías.");
-    });
-    return unsubscribe;
+  useEffect(() => { 
+    const ref = collection(db, `artifacts/${canvasAppId}/categories`);
+    const q = query(ref, orderBy("name"));
+    const unsub = onSnapshot(q, (snap) => setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() }))), 
+      (err) => { console.error("Error al cargar categorías:", err); showGenericMessageModal("Error de Carga", "No se pudieron cargar las categorías."); });
+    return unsub;
   }, [canvasAppId]); 
 
-  useEffect(() => { /* Productos */ 
+  useEffect(() => { 
     setIsLoadingProducts(true);
-    const productsCollectionRef = collection(db, `artifacts/${canvasAppId}/products`);
-    const q = query(productsCollectionRef, orderBy("name"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        setProducts(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
-        setIsLoadingProducts(false);
-    }, (error) => {
-        console.error("Error al cargar productos:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar los productos.");
-        setIsLoadingProducts(false);
-    });
-    return unsubscribe;
+    const ref = collection(db, `artifacts/${canvasAppId}/products`);
+    const q = query(ref, orderBy("name"));
+    const unsub = onSnapshot(q, (snap) => { setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setIsLoadingProducts(false); },
+      (err) => { console.error("Error al cargar productos:", err); showGenericMessageModal("Error de Carga", "No se pudieron cargar los productos."); setIsLoadingProducts(false); });
+    return unsub;
   }, [canvasAppId]); 
 
-  useEffect(() => { /* StockMovements */ 
+  useEffect(() => { 
     setIsLoadingMovements(true);
-    const movementsCollectionRef = collection(db, `artifacts/${canvasAppId}/stockMovements`);
-    const q = query(movementsCollectionRef, orderBy("timestamp", "desc")); 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        setStockMovements(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
-        setIsLoadingMovements(false);
-    }, (error) => {
-        console.error("Error al cargar movimientos de stock:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar los movimientos de stock.");
-        setIsLoadingMovements(false);
-    });
-    return unsubscribe;
-  }, [canvasAppId]); 
+    const ref = collection(db, `artifacts/${canvasAppId}/stockMovements`);
+    const q = query(ref, orderBy("timestamp", "desc")); 
+    const unsub = onSnapshot(q, (snap) => { setStockMovements(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setIsLoadingMovements(false); },
+      (err) => { console.error("Error al cargar movimientos de stock:", err); showGenericMessageModal("Error de Carga", "No se pudieron cargar los movimientos de stock."); setIsLoadingMovements(false); });
+    return unsub;
+  }, [canvasAppId]);
 
-  useEffect(() => { /* Listener de Autenticación */
-    console.log("AppContent useEffect: Configurando listener para onAuthStateChanged...");
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log("onAuthStateChanged: Usuario logueado:", user.uid, user.email);
-        setCurrentUser({ 
-            uid: user.uid, 
-            email: user.email, 
-            displayName: user.displayName,
-            photoURL: user.photoURL 
-        });
-      } else {
-        console.log("onAuthStateChanged: Usuario no logueado.");
-        setCurrentUser(null);
-      }
+  useEffect(() => { 
+    console.log("AppContent: Configurando listener onAuthStateChanged...");
+    const unsub = onAuthStateChanged(auth, (user) => {
+      console.log("AppContent onAuthStateChanged: user ->", user ? user.uid : null);
+      setCurrentUser(user ? { uid: user.uid, email: user.email, displayName: user.displayName, photoURL: user.photoURL } : null);
       setAuthLoading(false); 
     });
-    return unsubscribe; 
+    return unsub; 
   }, []); 
 
   const financialMetrics = useMemo(() => {
@@ -163,7 +136,6 @@ function AppContent() {
         const cost = Number(product.costPrice || 0);
         const salePrice = Number(product.salePrice || 0);
         const quantity = Number(m.quantityChange || 0);
-
         if (m.type === 'compra' && quantity > 0) totalInvestment += quantity * cost;
         if (m.type === 'venta' && quantity < 0) {
           totalRevenue += Math.abs(quantity) * salePrice;
@@ -182,7 +154,7 @@ function AppContent() {
         (!selectedCategoryFilter || p.category === selectedCategoryFilter)
     );
   }, [products, searchTerm, selectedCategoryFilter]);
-
+  
   const handleRegister = async (email, password) => {
     console.log("handleRegister CALLED con email:", email);
     try {
@@ -234,14 +206,12 @@ function AppContent() {
       showGenericMessageModal("Error al Cerrar Sesión", `No se pudo cerrar sesión: ${error.message}`);
     }
   };
-  
+
   const toggleTheme = () => setCurrentTheme(prev => prev === 'dark' ? 'light' : 'dark');
   const openAddProductModal = (product = null) => { setProductToEdit(product); setIsAddProductModalOpen(true); };
   const closeAddProductModal = () => { setIsAddProductModalOpen(false); setProductToEdit(null); };
   const openAddCategoryModal = () => setIsAddCategoryModalOpen(true);
   const closeAddCategoryModal = () => setIsAddCategoryModalOpen(false);
-  const showGenericMessageModal = (title, text, actions = []) => setModalMessage({ title, text, isOpen: true, actions });
-  const closeGenericMessageModal = () => setModalMessage({ title: '', text: '', isOpen: false, actions: [] });
   
   const getMovementTypeDisplay = (type) => {
       switch (type) {
@@ -310,7 +280,9 @@ function AppContent() {
                     notes: `Stock inicial (${getMovementTypeDisplay(finalProductData.initialStockType)}).`,
                     ...(currentUser && { userId: currentUser.uid, userEmail: currentUser.email })
                 };
-                await handleRegisterStockMovement(movementDataForInitialStock, () => {});
+                await handleRegisterStockMovement(movementDataForInitialStock, () => {
+                     console.log(`Mov. stock inicial tipo "${finalProductData.initialStockType}" para "${finalProductData.name}" registrado.`);
+                });
             }
         }
         if (onSuccessCallback) onSuccessCallback(); 
@@ -321,7 +293,7 @@ function AppContent() {
   };
   
   const handleDeleteProduct = async (productId, productName) => {
-    showGenericMessageModal( "Confirmar Eliminación", `¿Eliminar "${productName}"?`,
+    showGenericMessageModal( "Confirmar Eliminación", `¿Eliminar "${productName}"? Los movimientos de stock asociados no se eliminarán.`,
         [
             { text: "Cancelar" },
             { text: "Eliminar", className: "btn btn-danger", 
@@ -368,7 +340,7 @@ function AppContent() {
 
   const handleRegisterStockMovement = async (movementData, onSuccessCallback) => {
     if (!movementData.productId || movementData.quantity === undefined || !movementData.type) {
-        showGenericMessageModal("Error de Validación", "Faltan datos."); return;
+        showGenericMessageModal("Error de Validación", "Faltan datos para registrar el movimiento."); return;
     }
     const productDocRef = doc(db, `artifacts/${canvasAppId}/products`, movementData.productId);
     const stockMovementsCollectionRef = collection(db, `artifacts/${canvasAppId}/stockMovements`);
@@ -376,16 +348,16 @@ function AppContent() {
     const egresoTypes = ['venta', 'devolucion_proveedor', 'ajuste_salida', 'merma'];
     if (egresoTypes.includes(movementData.type)) quantityChange = -Math.abs(quantityChange); 
     else quantityChange = Math.abs(quantityChange); 
-    if (quantityChange === 0) { showGenericMessageModal("Advertencia", "Cantidad no puede ser cero."); return; }
+    if (quantityChange === 0) { showGenericMessageModal("Advertencia", "La cantidad del movimiento no puede ser cero."); return; }
 
     try {
         await runTransaction(db, async (transaction) => {
             const productDocSnap = await transaction.get(productDocRef); 
-            if (!productDocSnap.exists()) throw new Error("Producto no existe.");
+            if (!productDocSnap.exists()) throw new Error("El producto para este movimiento ya no existe.");
             const currentProductData = productDocSnap.data(); 
             const currentStock = currentProductData.currentStock || 0;
             if (quantityChange < 0 && (currentStock + quantityChange < 0)) { 
-                throw new Error(`Stock insuficiente para "${currentProductData.name}".`);
+                throw new Error(`Stock insuficiente para "${currentProductData.name}". Actual: ${currentStock}, se intentarían restar: ${Math.abs(quantityChange)}`);
             }
             const newStock = currentStock + quantityChange;
             transaction.update(productDocRef, { currentStock: newStock, lastUpdate: serverTimestamp() });
@@ -402,36 +374,24 @@ function AppContent() {
         if(onSuccessCallback) onSuccessCallback();
     } catch (error) {
         console.error("Error registrando movimiento de stock:", error);
-        showGenericMessageModal("Error", `No se pudo registrar: ${error.message}`);
+        showGenericMessageModal("Error", `No se pudo registrar el movimiento: ${error.message}`);
     }
   };
 
   if (authLoading) {
-    return (
-        <div id="loader" className="loader-container" style={{ display: 'flex', opacity: 1 }}>
-            <div className="loader"></div>
-            <p>Verificando autenticación...</p>
-        </div>
-    );
+    return ( <div id="loader" className="loader-container" style={{ display: 'flex', opacity: 1 }}><div className="loader"></div><p>Verificando autenticación...</p></div> );
   }
 
   return (
     <>
       <div id="app-container">
-        <Header 
-            onToggleTheme={toggleTheme} 
-            currentTheme={currentTheme} 
-            currentUser={currentUser}
-            onLogout={handleLogout}
-        />
-        <Nav 
-            currentUser={currentUser} 
-        />
+        <Header currentUser={currentUser} onLogout={handleLogout} onToggleTheme={toggleTheme} currentTheme={currentTheme} />
+        <Nav currentUser={currentUser} />
         <main id="main-content">
           <Routes>
             <Route path="/" element={currentUser ? <Navigate replace to="/dashboard" /> : <Navigate replace to="/login" />} />
-            <Route path="/login" element={!currentUser ? <LoginPage onLogin={handleLogin} /> : <Navigate replace to="/dashboard" />} />
-            <Route path="/register" element={!currentUser ? <RegisterPage onRegister={handleRegister} /> : <Navigate replace to="/dashboard" />} />
+            <Route path="/login" element={!currentUser ? <LoginPage onLogin={handleLogin} showMessageModal={showGenericMessageModal} /> : <Navigate replace to="/dashboard" />} />
+            <Route path="/register" element={!currentUser ? <RegisterPage onRegister={handleRegister} showMessageModal={showGenericMessageModal} /> : <Navigate replace to="/dashboard" />} />
             
             <Route element={<ProtectedRoute currentUser={currentUser} />}>
                 <Route path="/dashboard" element={<DashboardPage financialMetrics={financialMetrics} products={products} stockMovements={stockMovements} categories={categories}/>} />
@@ -444,6 +404,10 @@ function AppContent() {
                                 currentUser={currentUser} 
                                 auth={auth} 
                                 db={db} 
+                                canvasAppId={canvasAppId}
+                                showMessageModal={showGenericMessageModal}
+                                cloudinaryUploadUrl={CLOUDINARY_UPLOAD_URL}
+                                cloudinaryUploadPreset={CLOUDINARY_UPLOAD_PRESET}
                             />} 
                 />
             </Route>
@@ -451,10 +415,8 @@ function AppContent() {
         </main>
         <Footer />
       </div>
-      
-      <AddProductModal isOpen={isAddProductModalOpen} onClose={closeAddProductModal} onOpenAddCategoryModal={openAddCategoryModal} categories={categories} onSaveProduct={handleSaveProduct} productToEdit={productToEdit} CLOUDINARY_UPLOAD_URL={`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`} CLOUDINARY_UPLOAD_PRESET={CLOUDINARY_UPLOAD_PRESET}/>
+      <AddProductModal isOpen={isAddProductModalOpen} onClose={closeAddProductModal} onOpenAddCategoryModal={openAddCategoryModal} categories={categories} onSaveProduct={handleSaveProduct} productToEdit={productToEdit} CLOUDINARY_UPLOAD_URL={CLOUDINARY_UPLOAD_URL} CLOUDINARY_UPLOAD_PRESET={CLOUDINARY_UPLOAD_PRESET}/>
       <AddCategoryModal isOpen={isAddCategoryModalOpen} onClose={closeAddCategoryModal} onSaveCategory={handleSaveCategory} />
-      
       {modalMessage.isOpen && (
          <div id="modal" className="modal" style={{display: 'block'}}> 
              <div className="modal-content modal-sm">
@@ -467,18 +429,11 @@ function AppContent() {
                              <button 
                                  key={index} 
                                  className={action.className || 'btn'} 
-                                 onClick={() => {
-                                     if (action.callback) action.callback();
-                                     closeGenericMessageModal();
-                                 }}
+                                 onClick={() => { if (action.callback) action.callback(); closeGenericMessageModal(); }}
                                  style={index > 0 ? { marginLeft: '10px' } : {}}
-                             >
-                                 {action.text}
-                             </button>
+                             >{action.text}</button>
                          ))
-                     ) : (
-                         <button className="btn btn-success" onClick={closeGenericMessageModal}>OK</button>
-                     )}
+                     ) : ( <button className="btn btn-success" onClick={closeGenericMessageModal}>OK</button> )}
                  </div>
              </div>
          </div>
@@ -486,12 +441,5 @@ function AppContent() {
     </>
   );
 }
-
-function App() {
-  return (
-    <Router>
-      <AppContent />
-    </Router>
-  );
-}
+function App() { return (<Router><AppContent /></Router>); }
 export default App;
