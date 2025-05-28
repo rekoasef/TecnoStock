@@ -1,5 +1,5 @@
 // src/components/pages/StockMovementsPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const StockMovementsPage = ({ 
     products, 
@@ -10,15 +10,24 @@ const StockMovementsPage = ({
 }) => {
     const [selectedProductId, setSelectedProductId] = useState('');
     const [quantity, setQuantity] = useState('');
-    // Tipos de movimiento: el valor será lo que se guarde en Firestore.
-    // El texto es lo que ve el usuario.
+    // --- MODIFICADO: Tipo de movimiento por defecto a 'venta' (egreso) ---
     const [movementType, setMovementType] = useState('venta'); 
     const [notes, setNotes] = useState('');
+
+    // Efecto para resetear el tipo de movimiento si las opciones cambian
+    // y la actual ya no es válida (aunque en este caso siempre será 'venta' al inicio)
+    useEffect(() => {
+        // Opciones de egreso
+        const egresoTypes = ['venta', 'devolucion_proveedor', 'ajuste_salida', 'merma'];
+        if (!egresoTypes.includes(movementType)) {
+            setMovementType('venta'); // Si por alguna razón no es un egreso válido, resetear a 'venta'
+        }
+    }, []); // Se ejecuta una vez al montar
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!selectedProductId || quantity === '' || !movementType) {
-            alert("Por favor, selecciona un producto, ingresa una cantidad y un tipo de movimiento."); // Reemplazar con showGenericMessageModal desde App.jsx si se pasa como prop
+            alert("Por favor, selecciona un producto, ingresa una cantidad y un tipo de movimiento de egreso.");
             return;
         }
         const product = products.find(p => p.id === selectedProductId);
@@ -28,8 +37,8 @@ const StockMovementsPage = ({
         }
 
         const parsedQuantity = parseInt(quantity);
-        if (isNaN(parsedQuantity) || parsedQuantity <= 0) { // La cantidad siempre debe ser positiva aquí
-            alert("La cantidad debe ser un número positivo. El tipo de movimiento determinará si es ingreso o egreso.");
+        if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+            alert("La cantidad debe ser un número positivo. El tipo de movimiento determinará el egreso.");
             return;
         }
 
@@ -37,27 +46,26 @@ const StockMovementsPage = ({
             productId: selectedProductId,
             productName: product.name, 
             quantity: parsedQuantity, // Siempre positivo, la lógica de signo va en App.jsx
-            type: movementType,
+            type: movementType, // Será un tipo de egreso
             notes: notes.trim(),
         };
         
-        // Llamar a la función pasada por props para registrar el movimiento
         onRegisterStockMovement(movementData, () => {
-            // Callback para limpiar el formulario después de un registro exitoso
             setSelectedProductId('');
             setQuantity('');
-            setMovementType('venta'); // Resetear al tipo por defecto
+            setMovementType('venta'); // Resetear al tipo por defecto ('venta')
             setNotes('');
         });
     };
 
+    // Función para mostrar el nombre legible del tipo de movimiento (se mantiene igual)
     const getMovementTypeDisplay = (type) => {
         switch (type) {
             case 'venta': return 'Venta (Egreso)';
-            case 'compra': return 'Compra/Ingreso (Ingreso)';
-            case 'devolucion_cliente': return 'Devolución Cliente (Ingreso)';
+            case 'compra': return 'Compra/Ingreso (Ingreso)'; // Se mantiene por si hay datos históricos
+            case 'devolucion_cliente': return 'Devolución Cliente (Ingreso)'; // Se mantiene por si hay datos históricos
             case 'devolucion_proveedor': return 'Devolución Proveedor (Egreso)';
-            case 'ajuste_entrada': return 'Ajuste (Ingreso)';
+            case 'ajuste_entrada': return 'Ajuste (Ingreso)'; // Se mantiene por si hay datos históricos
             case 'ajuste_salida': return 'Ajuste (Egreso)';
             case 'merma': return 'Merma/Pérdida (Egreso)';
             default: return type;
@@ -67,9 +75,8 @@ const StockMovementsPage = ({
 
     return (
         <section id="stock-movements-section" className="content-section">
-            <h2>Registro y Historial de Movimientos de Stock</h2>
+            <h2>Registro de Egresos de Stock y Historial</h2>
 
-            {/* Formulario para Registrar Nuevo Movimiento */}
             <div className="form-container" style={{ 
                 marginBottom: '30px', 
                 padding: '20px', 
@@ -77,7 +84,7 @@ const StockMovementsPage = ({
                 borderRadius: 'var(--border-radius)', 
                 boxShadow: 'var(--box-shadow)' 
             }}>
-                <h3>Registrar Nuevo Movimiento</h3>
+                <h3>Registrar Nuevo Egreso de Stock</h3>
                 <form id="stock-movement-form" onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label htmlFor="product-select-stock">Producto:</label>
@@ -97,8 +104,9 @@ const StockMovementsPage = ({
                         </select>
                     </div>
 
+                    {/* --- MODIFICADO: Select solo con opciones de EGRESO --- */}
                     <div className="form-group">
-                        <label htmlFor="movement-type-stock">Tipo de Movimiento:</label>
+                        <label htmlFor="movement-type-stock">Tipo de Egreso:</label>
                         <select 
                             id="movement-type-stock" 
                             className="form-control" 
@@ -107,18 +115,14 @@ const StockMovementsPage = ({
                             required
                         >
                             <option value="venta">Venta (Egreso)</option>
-                            <option value="compra">Compra/Ingreso Producción (Ingreso)</option>
-                            <option value="devolucion_cliente">Devolución de Cliente (Ingreso)</option>
                             <option value="devolucion_proveedor">Devolución a Proveedor (Egreso)</option>
-                            <option value="ajuste_entrada">Ajuste de Inventario (Ingreso)</option>
                             <option value="ajuste_salida">Ajuste de Inventario (Egreso)</option>
                             <option value="merma">Merma/Pérdida (Egreso)</option>
-                            {/* Considerar si "Otro" necesita una lógica especial */}
                         </select>
                     </div>
 
                     <div className="form-group">
-                        <label htmlFor="quantity-stock">Cantidad (Unidades):</label>
+                        <label htmlFor="quantity-stock">Cantidad (Unidades a Egresar):</label>
                         <input 
                             type="number" 
                             id="quantity-stock" 
@@ -129,7 +133,7 @@ const StockMovementsPage = ({
                             required 
                             min="1" 
                         />
-                        <small>Ingrese siempre una cantidad positiva. El "Tipo de Movimiento" determina si es un ingreso o un egreso.</small>
+                        <small>Ingrese siempre una cantidad positiva. El tipo de movimiento ya indica que es un egreso.</small>
                     </div>
                     
                     <div className="form-group">
@@ -142,11 +146,10 @@ const StockMovementsPage = ({
                             onChange={(e) => setNotes(e.target.value)}
                         ></textarea>
                     </div>
-                    <button type="submit" className="btn btn-success">Registrar Movimiento</button>
+                    <button type="submit" className="btn btn-success">Registrar Egreso</button>
                 </form>
             </div>
 
-            {/* Historial de Movimientos de Stock */}
             <h3>Historial de Movimientos</h3>
             <div className="table-responsive">
                 <table id="stock-movements-table" className="table">
@@ -158,7 +161,6 @@ const StockMovementsPage = ({
                             <th>Cantidad Modificada</th>
                             <th>Stock Resultante</th>
                             <th>Notas</th>
-                            {/* <th>Usuario</th> */}
                         </tr>
                     </thead>
                     <tbody>

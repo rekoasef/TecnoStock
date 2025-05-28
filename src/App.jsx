@@ -1,5 +1,5 @@
 // src/App.jsx
-// Script Version: v1.0.15 (Movimiento de Stock Completo)
+// Script Version: v1.0.24 (Ruta a Perfil Añadida)
 import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
@@ -10,7 +10,15 @@ import {
     onSnapshot, orderBy, serverTimestamp, doc, updateDoc, deleteDoc,
     runTransaction 
 } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-firestore.js";
-// import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-auth.js"; // Para cuando implementemos login
+// --- Importaciones de Firebase Auth ---
+import { 
+    getAuth, 
+    onAuthStateChanged, 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword, 
+    signOut as firebaseSignOut,
+    updateProfile // Necesario si ProfilePage lo usa y no lo importa directamente
+} from "https://www.gstatic.com/firebasejs/11.8.1/firebase-auth.js";
 
 
 // --- IMPORTACIONES DE COMPONENTES ---
@@ -23,6 +31,11 @@ import FinancesPage from './components/pages/FinancesPage';
 import StockMovementsPage from './components/pages/StockMovementsPage';
 import AddProductModal from './components/modals/AddProductModal';
 import AddCategoryModal from './components/modals/AddCategoryModal';
+import LoginPage from './components/pages/auth/LoginPage'; 
+import RegisterPage from './components/pages/auth/RegisterPage'; 
+import ProtectedRoute from './components/ProtectedRoute'; 
+import ProfilePage from './components/pages/ProfilePage'; // <--- AÑADIDA IMPORTACIÓN
+
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = {
@@ -34,16 +47,15 @@ const firebaseConfig = {
     appId: "1:231093419794:web:cb6af0ac205083be433dcb",
     measurementId: "G-FQNFW01KTF" 
 };
-const canvasAppId = 'default-app-id'; 
-
-const CLOUDINARY_CLOUD_NAME = 'dgqbwrgot';
+const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const CLOUDINARY_CLOUD_NAME = 'dgqbwrgot'; 
 const CLOUDINARY_UPLOAD_PRESET = 'gestor_productos_unsigned';
 
 // --- INICIALIZACIÓN DE FIREBASE ---
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp); 
-// const auth = getAuth(fbApp); 
-console.log("Firebase App and Firestore DB initialized in App.jsx");
+const auth = getAuth(fbApp); 
+console.log("Firebase App, Firestore DB, and Auth initialized in App.jsx");
 
 function AppContent() {
   const [currentTheme, setCurrentTheme] = useState(() => localStorage.getItem('theme') || 'dark');
@@ -58,138 +70,207 @@ function AppContent() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
   const [stockMovements, setStockMovements] = useState([]);
   const [isLoadingMovements, setIsLoadingMovements] = useState(true);
+  
+  // Estados de Autenticación
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); 
 
-  // Efecto para ocultar el loader HTML inicial
-  useEffect(() => {
+  useEffect(() => { /* Loader HTML */ 
     const loaderElement = document.getElementById('loader');
     if (loaderElement) {
       loaderElement.classList.add('loader-hidden');
-      console.log("Loader HTML ocultado desde AppContent useEffect");
     }
   }, []);
-
-  // Efecto para aplicar el tema al body
-  useEffect(() => { 
+  useEffect(() => { /* Tema */ 
     document.body.className = ''; 
     if (currentTheme === 'light') {
       document.body.classList.add('light-mode');
     }
     localStorage.setItem('theme', currentTheme);
-    console.log("AppContent useEffect: Tema aplicado al body:", currentTheme);
   }, [currentTheme]);
 
-  // Efecto para cargar categorías desde Firestore en tiempo real
-  useEffect(() => { 
-    console.log("AppContent useEffect: Configurando listener para categorías...");
+  useEffect(() => { /* Categorías */ 
     const categoriesCollectionRef = collection(db, `artifacts/${canvasAppId}/categories`);
     const q = query(categoriesCollectionRef, orderBy("name"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCategories(fetchedCategories);
-        console.log("Categorías cargadas/actualizadas desde Firestore:", fetchedCategories);
+        setCategories(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
     }, (error) => {
-        console.error("Error al cargar categorías desde Firestore:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar las categorías: " + error.message);
+        console.error("Error al cargar categorías:", error);
+        showGenericMessageModal("Error de Carga", "No se pudieron cargar las categorías.");
     });
-    return () => {
-      console.log("AppContent useEffect: Desuscribiendo listener de categorías.");
-      unsubscribe();
-    };
-  }, []); // Dependencia vacía, se ejecuta solo al montar
+    return unsubscribe;
+  }, [canvasAppId]); 
 
-  // Efecto para cargar productos desde Firestore en tiempo real
-  useEffect(() => {
-    console.log("AppContent useEffect: Configurando listener para productos...");
+  useEffect(() => { /* Productos */ 
     setIsLoadingProducts(true);
     const productsCollectionRef = collection(db, `artifacts/${canvasAppId}/products`);
     const q = query(productsCollectionRef, orderBy("name"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setProducts(fetchedProducts);
+        setProducts(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
         setIsLoadingProducts(false);
-        console.log("Productos cargados/actualizados desde Firestore:", fetchedProducts);
     }, (error) => {
-        console.error("Error al cargar productos desde Firestore:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar los productos: " + error.message);
+        console.error("Error al cargar productos:", error);
+        showGenericMessageModal("Error de Carga", "No se pudieron cargar los productos.");
         setIsLoadingProducts(false);
     });
-    return () => {
-      console.log("AppContent useEffect: Desuscribiendo listener de productos.");
-      unsubscribe();
-    };
-  }, []); // Dependencia vacía, se ejecuta solo al montar
+    return unsubscribe;
+  }, [canvasAppId]); 
 
-  // Efecto para cargar movimientos de stock
-  useEffect(() => {
-    console.log("AppContent useEffect: Configurando listener para stockMovements...");
+  useEffect(() => { /* StockMovements */ 
     setIsLoadingMovements(true);
     const movementsCollectionRef = collection(db, `artifacts/${canvasAppId}/stockMovements`);
     const q = query(movementsCollectionRef, orderBy("timestamp", "desc")); 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedMovements = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setStockMovements(fetchedMovements);
+        setStockMovements(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
         setIsLoadingMovements(false);
-        console.log("Movimientos de stock cargados/actualizados:", fetchedMovements);
     }, (error) => {
         console.error("Error al cargar movimientos de stock:", error);
-        showGenericMessageModal("Error de Carga", "No se pudieron cargar los movimientos de stock: " + error.message);
+        showGenericMessageModal("Error de Carga", "No se pudieron cargar los movimientos de stock.");
         setIsLoadingMovements(false);
     });
-    return () => {
-        console.log("AppContent useEffect: Desuscribiendo listener de stockMovements.");
-        unsubscribe();
-    };
-  }, []); // Dependencia vacía, se ejecuta solo al montar
+    return unsubscribe;
+  }, [canvasAppId]); 
 
+  useEffect(() => { /* Listener de Autenticación */
+    console.log("AppContent useEffect: Configurando listener para onAuthStateChanged...");
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log("onAuthStateChanged: Usuario logueado:", user.uid, user.email);
+        setCurrentUser({ 
+            uid: user.uid, 
+            email: user.email, 
+            displayName: user.displayName,
+            photoURL: user.photoURL 
+        });
+      } else {
+        console.log("onAuthStateChanged: Usuario no logueado.");
+        setCurrentUser(null);
+      }
+      setAuthLoading(false); 
+    });
+    return unsubscribe; 
+  }, []); 
 
-  const filteredProducts = useMemo(() => {
-    let tempProducts = products;
-    if (searchTerm) {
-      tempProducts = tempProducts.filter(product =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  const financialMetrics = useMemo(() => {
+    let totalStockValueAtCost = 0, totalInvestment = 0, totalRevenue = 0, totalCOGS = 0, netProfit = 0;
+    if (products?.length) {
+      totalStockValueAtCost = products.reduce((s, p) => s + (Number(p.currentStock || 0) * Number(p.costPrice || 0)), 0);
     }
-    if (selectedCategoryFilter) {
-      tempProducts = tempProducts.filter(product =>
-        product.category === selectedCategoryFilter
-      );
+    if (stockMovements?.length && products?.length) {
+      stockMovements.forEach(m => {
+        const product = products.find(p => p.id === m.productId);
+        if (!product) return;
+        const cost = Number(product.costPrice || 0);
+        const salePrice = Number(product.salePrice || 0);
+        const quantity = Number(m.quantityChange || 0);
+
+        if (m.type === 'compra' && quantity > 0) totalInvestment += quantity * cost;
+        if (m.type === 'venta' && quantity < 0) {
+          totalRevenue += Math.abs(quantity) * salePrice;
+          totalCOGS += Math.abs(quantity) * cost;
+        }
+      });
     }
-    return tempProducts;
+    netProfit = totalRevenue - totalCOGS;
+    return { totalStockValueAtCost, totalInvestment, totalRevenue, totalCOGS, netProfit };
+  }, [products, stockMovements]);
+
+  const filteredProducts = useMemo(() => { 
+    if (!products) return [];
+    return products.filter(p => 
+        (!searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase())) &&
+        (!selectedCategoryFilter || p.category === selectedCategoryFilter)
+    );
   }, [products, searchTerm, selectedCategoryFilter]);
 
+  const handleRegister = async (email, password) => {
+    console.log("handleRegister CALLED con email:", email);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      console.log("Usuario registrado exitosamente:", userCredential.user);
+      showGenericMessageModal("Registro Exitoso", `¡Bienvenido ${userCredential.user.email}! Por favor, inicia sesión.`);
+      return true; 
+    } catch (error) {
+      console.error("Error en handleRegister:", error);
+      let errorMessage = "No se pudo registrar: ";
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage += "El correo electrónico ya está en uso.";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage += "La contraseña es demasiado débil (mínimo 6 caracteres).";
+      } else {
+        errorMessage += error.message;
+      }
+      showGenericMessageModal("Error de Registro", errorMessage);
+      return false; 
+    }
+  };
+
+  const handleLogin = async (email, password) => {
+    console.log("handleLogin CALLED con email:", email);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      console.log("Usuario logueado exitosamente:", userCredential.user);
+      return true; 
+    } catch (error) {
+      console.error("Error en handleLogin:", error);
+      let errorMessage = "No se pudo iniciar sesión: ";
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        errorMessage += "Correo electrónico o contraseña incorrectos.";
+      } else {
+        errorMessage += error.message;
+      }
+      showGenericMessageModal("Error de Inicio de Sesión", errorMessage);
+      return false; 
+    }
+  };
+
+  const handleLogout = async () => {
+    console.log("handleLogout CALLED");
+    try {
+      await firebaseSignOut(auth);
+      console.log("Usuario deslogueado exitosamente.");
+    } catch (error) {
+      console.error("Error en handleLogout:", error);
+      showGenericMessageModal("Error al Cerrar Sesión", `No se pudo cerrar sesión: ${error.message}`);
+    }
+  };
+  
   const toggleTheme = () => setCurrentTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  
-  const openAddProductModal = (product = null) => {
-    setProductToEdit(product); 
-    setIsAddProductModalOpen(true);
-  };
-  const closeAddProductModal = () => {
-    setIsAddProductModalOpen(false);
-    setProductToEdit(null); 
-  };
-  
+  const openAddProductModal = (product = null) => { setProductToEdit(product); setIsAddProductModalOpen(true); };
+  const closeAddProductModal = () => { setIsAddProductModalOpen(false); setProductToEdit(null); };
   const openAddCategoryModal = () => setIsAddCategoryModalOpen(true);
   const closeAddCategoryModal = () => setIsAddCategoryModalOpen(false);
-
-  const showGenericMessageModal = (title, text, actions = []) => {
-    setModalMessage({ title, text, isOpen: true, actions });
-  };
-  const closeGenericMessageModal = () => {
-    setModalMessage({ title: '', text: '', isOpen: false, actions: [] });
+  const showGenericMessageModal = (title, text, actions = []) => setModalMessage({ title, text, isOpen: true, actions });
+  const closeGenericMessageModal = () => setModalMessage({ title: '', text: '', isOpen: false, actions: [] });
+  
+  const getMovementTypeDisplay = (type) => {
+      switch (type) {
+          case 'venta': return 'Venta';
+          case 'compra': return 'Compra/Ingreso';
+          case 'devolucion_cliente': return 'Devolución Cliente';
+          case 'devolucion_proveedor': return 'Devolución Proveedor';
+          case 'ajuste_entrada': return 'Ajuste Entrada';
+          case 'ajuste_salida': return 'Ajuste Salida';
+          case 'merma': return 'Merma/Pérdida';
+          default: return type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Desconocido'; 
+      }
   };
 
   const handleSaveCategory = async (categoryName, onSuccessCallback) => {
-    console.log("handleSaveCategory CALLED con:", categoryName);
+    if (!categoryName || categoryName.trim() === "") {
+        showGenericMessageModal("Error", "El nombre de la categoría no puede estar vacío.");
+        return;
+    }
     try {
         const categoriesCollectionRef = collection(db, `artifacts/${canvasAppId}/categories`);
-        const lowerCaseCategoryName = categoryName.toLowerCase();
-        const categoryExists = categories.some(cat => cat.name.toLowerCase() === lowerCaseCategoryName);
-
-        if (categoryExists) {
-            showGenericMessageModal("Advertencia", `La categoría "${categoryName}" ya existe.`);
+        const categoryNameTrimmed = categoryName.trim();
+        const categoryExistsQuery = query(categoriesCollectionRef, where("name", "==", categoryNameTrimmed));
+        const querySnapshot = await getDocs(categoryExistsQuery);
+        if (!querySnapshot.empty) {
+            showGenericMessageModal("Advertencia", `La categoría "${categoryNameTrimmed}" ya existe.`);
         } else {
-            await addDoc(categoriesCollectionRef, { name: categoryName });
-            showGenericMessageModal("Éxito", `Categoría "${categoryName}" agregada correctamente.`);
+            await addDoc(categoriesCollectionRef, { name: categoryNameTrimmed, creationDate: serverTimestamp() });
+            showGenericMessageModal("Éxito", `Categoría "${categoryNameTrimmed}" agregada correctamente.`);
             if (onSuccessCallback) onSuccessCallback(); 
         }
     } catch (error) {
@@ -199,30 +280,38 @@ function AppContent() {
   };
 
   const handleSaveProduct = async (productDataFromForm, onSuccessCallback) => {
-    console.log("handleSaveProduct CALLED con:", productDataFromForm, "Editando producto:", productToEdit);
     try {
         const finalProductData = {
             ...productDataFromForm,
             lastUpdate: serverTimestamp(),
+            ...(currentUser && { updatedByUserId: currentUser.uid, updatedByUserEmail: currentUser.email })
         };
-
         if (productToEdit && productToEdit.id) { 
-            console.log("Actualizando producto ID:", productToEdit.id);
             const productDocRef = doc(db, `artifacts/${canvasAppId}/products`, productToEdit.id);
+            delete finalProductData.initialStockType; 
             await updateDoc(productDocRef, finalProductData);
             showGenericMessageModal("Éxito", `Producto "${finalProductData.name}" actualizado correctamente.`);
         } else { 
             finalProductData.creationDate = serverTimestamp();
-            if (finalProductData.currentStock !== undefined && finalProductData.initialStock === undefined) {
-                finalProductData.initialStock = finalProductData.currentStock;
+            if (currentUser) {
+                finalProductData.createdByUserId = currentUser.uid;
+                finalProductData.createdByUserEmail = currentUser.email;
             }
-            if (!finalProductData.idCode) {
-                delete finalProductData.idCode; 
-            }
+            if (!finalProductData.idCode) delete finalProductData.idCode; 
             const productsCollectionRef = collection(db, `artifacts/${canvasAppId}/products`);
-            const docRef = await addDoc(productsCollectionRef, finalProductData);
-            console.log("Producto nuevo guardado con ID: ", docRef.id);
+            const newProductDocRef = await addDoc(productsCollectionRef, finalProductData);
             showGenericMessageModal("Éxito", `Producto "${finalProductData.name}" agregado correctamente.`);
+            if (finalProductData.initialStock > 0 && finalProductData.initialStockType) {
+                const movementDataForInitialStock = {
+                    productId: newProductDocRef.id,
+                    productName: finalProductData.name,
+                    type: finalProductData.initialStockType, 
+                    quantity: finalProductData.initialStock, 
+                    notes: `Stock inicial (${getMovementTypeDisplay(finalProductData.initialStockType)}).`,
+                    ...(currentUser && { userId: currentUser.uid, userEmail: currentUser.email })
+                };
+                await handleRegisterStockMovement(movementDataForInitialStock, () => {});
+            }
         }
         if (onSuccessCallback) onSuccessCallback(); 
     } catch (error) {
@@ -231,121 +320,142 @@ function AppContent() {
     }
   };
   
-  const handleDeleteProduct = async (productId, productName) => { /* ... como antes ... */ };
-  const handleViewDetails = (product) => { /* ... como antes ... */ };
-  const formatFirestoreTimestamp = (timestamp) => { /* ... como antes ... */ };
+  const handleDeleteProduct = async (productId, productName) => {
+    showGenericMessageModal( "Confirmar Eliminación", `¿Eliminar "${productName}"?`,
+        [
+            { text: "Cancelar" },
+            { text: "Eliminar", className: "btn btn-danger", 
+                callback: async () => {
+                    try {
+                        await deleteDoc(doc(db, `artifacts/${canvasAppId}/products`, productId));
+                        showGenericMessageModal("Éxito", `Producto "${productName}" eliminado.`);
+                    } catch (error) {
+                        showGenericMessageModal("Error", `No se pudo eliminar: ${error.message}`);
+                    }
+                }
+            }
+        ]
+    );
+  };
+
+  const handleViewDetails = (product) => {
+    const detailsHtml = `
+        <p><strong>Nombre:</strong> ${product.name || 'N/A'}</p>
+        <p><strong>Categoría:</strong> ${product.category || 'N/A'}</p>
+        <p><strong>Detalle:</strong> ${product.productDetail || 'N/A'}</p>
+        <p><strong>Precio Costo:</strong> ${product.costPrice !== undefined ? `${product.costPrice} ${product.costCurrency || ''}` : 'N/A'}</p>
+        <p><strong>Precio Venta:</strong> ${product.salePrice !== undefined ? `${product.salePrice} ${product.saleCurrency || ''}` : 'N/A'}</p>
+        <p><strong>Stock Actual:</strong> ${product.currentStock !== undefined ? product.currentStock : 'N/A'}</p>
+        <p><strong>Stock Inicial:</strong> ${product.initialStock !== undefined ? product.initialStock : 'N/A'}</p>
+        <p><strong>Código ID:</strong> ${product.idCode || 'N/A'}</p>
+        <p><strong>Última Actualización:</strong> ${product.lastUpdate ? formatFirestoreTimestamp(product.lastUpdate) : 'N/A'}</p>
+        <p><strong>Fecha Creación:</strong> ${product.creationDate ? formatFirestoreTimestamp(product.creationDate) : 'N/A'}</p>
+        ${product.imageUrl ? `<img src="${product.imageUrl}" alt="${product.name}" style="max-width: 100%; height: auto; margin-top: 10px; border-radius: var(--border-radius);"/>` : ''}
+    `;
+    showGenericMessageModal(`Detalles de ${product.name}`, detailsHtml);
+  };
+
+  const formatFirestoreTimestamp = (timestamp) => {
+    if (!timestamp) return "N/A";
+    if (timestamp instanceof Date) { 
+        return timestamp.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }); 
+    }
+    if (timestamp.seconds !== undefined && timestamp.nanoseconds !== undefined) { 
+        return new Date(timestamp.seconds * 1000 + timestamp.nanoseconds / 1000000).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+    }
+    return "Fecha inválida";
+  };
 
   const handleRegisterStockMovement = async (movementData, onSuccessCallback) => {
-    console.log("handleRegisterStockMovement CALLED con:", movementData);
     if (!movementData.productId || movementData.quantity === undefined || !movementData.type) {
-        showGenericMessageModal("Error de Validación", "Faltan datos (producto, cantidad o tipo).");
-        return;
+        showGenericMessageModal("Error de Validación", "Faltan datos."); return;
     }
-
     const productDocRef = doc(db, `artifacts/${canvasAppId}/products`, movementData.productId);
     const stockMovementsCollectionRef = collection(db, `artifacts/${canvasAppId}/stockMovements`);
-    
-    let quantityChange = parseInt(movementData.quantity);
+    let quantityChange = parseInt(movementData.quantity); 
     const egresoTypes = ['venta', 'devolucion_proveedor', 'ajuste_salida', 'merma'];
-    if (egresoTypes.includes(movementData.type)) {
-        quantityChange = -Math.abs(quantityChange); 
-    } else {
-        quantityChange = Math.abs(quantityChange); 
-    }
-
-    if (quantityChange === 0) {
-        showGenericMessageModal("Advertencia", "La cantidad del movimiento no puede ser cero.");
-        return;
-    }
+    if (egresoTypes.includes(movementData.type)) quantityChange = -Math.abs(quantityChange); 
+    else quantityChange = Math.abs(quantityChange); 
+    if (quantityChange === 0) { showGenericMessageModal("Advertencia", "Cantidad no puede ser cero."); return; }
 
     try {
         await runTransaction(db, async (transaction) => {
-            const productDoc = await transaction.get(productDocRef);
-            if (!productDoc.exists()) {
-                throw new Error("El producto seleccionado ya no existe.");
-            }
-            const currentStock = productDoc.data().currentStock || 0;
+            const productDocSnap = await transaction.get(productDocRef); 
+            if (!productDocSnap.exists()) throw new Error("Producto no existe.");
+            const currentProductData = productDocSnap.data(); 
+            const currentStock = currentProductData.currentStock || 0;
             if (quantityChange < 0 && (currentStock + quantityChange < 0)) { 
-                throw new Error(`Stock insuficiente para "${productDoc.data().name}". Actual: ${currentStock}, Egreso: ${Math.abs(quantityChange)}`);
+                throw new Error(`Stock insuficiente para "${currentProductData.name}".`);
             }
             const newStock = currentStock + quantityChange;
             transaction.update(productDocRef, { currentStock: newStock, lastUpdate: serverTimestamp() });
-            transaction.set(doc(stockMovementsCollectionRef), { 
-                productId: movementData.productId,
-                productName: movementData.productName,
-                type: movementData.type,
-                quantityChange: quantityChange, 
-                stockBefore: currentStock,
-                stockAfter: newStock, 
-                notes: movementData.notes || '',
-                timestamp: serverTimestamp(),
-            });
+            const movementToSave = { 
+                productId: movementData.productId, productName: movementData.productName, 
+                type: movementData.type, quantityChange: quantityChange, 
+                stockBefore: currentStock, stockAfter: newStock, 
+                notes: movementData.notes || '', timestamp: serverTimestamp(),
+                ...(currentUser && { userId: currentUser.uid, userEmail: currentUser.email })
+            };
+            transaction.set(doc(stockMovementsCollectionRef), movementToSave);
         });
         showGenericMessageModal("Éxito", `Movimiento de stock para "${movementData.productName}" registrado.`);
         if(onSuccessCallback) onSuccessCallback();
     } catch (error) {
         console.error("Error registrando movimiento de stock:", error);
-        showGenericMessageModal("Error", `No se pudo registrar el movimiento: ${error.message}`);
+        showGenericMessageModal("Error", `No se pudo registrar: ${error.message}`);
     }
   };
+
+  if (authLoading) {
+    return (
+        <div id="loader" className="loader-container" style={{ display: 'flex', opacity: 1 }}>
+            <div className="loader"></div>
+            <p>Verificando autenticación...</p>
+        </div>
+    );
+  }
 
   return (
     <>
       <div id="app-container">
-        <Header onToggleTheme={toggleTheme} currentTheme={currentTheme} />
-        <Nav />
+        <Header 
+            onToggleTheme={toggleTheme} 
+            currentTheme={currentTheme} 
+            currentUser={currentUser}
+            onLogout={handleLogout}
+        />
+        <Nav 
+            currentUser={currentUser} 
+        />
         <main id="main-content">
           <Routes>
-            <Route path="/" element={<Navigate replace to="/dashboard" />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route 
-              path="/products" 
-              element={<ProductsPage 
-                            onOpenAddProductModal={openAddProductModal} 
-                            categories={categories} 
-                            products={filteredProducts} 
-                            isLoading={isLoadingProducts} 
-                            formatTimestamp={formatFirestoreTimestamp}
-                            onEditProduct={openAddProductModal} 
-                            onDeleteProduct={handleDeleteProduct}
-                            onViewDetails={handleViewDetails}
-                            searchTerm={searchTerm}
-                            setSearchTerm={setSearchTerm}
-                            selectedCategoryFilter={selectedCategoryFilter}
-                            setSelectedCategoryFilter={setSelectedCategoryFilter}
-                        />} 
-            />
-            <Route 
-              path="/stock-movements" 
-              element={<StockMovementsPage 
-                            products={products} 
-                            onRegisterStockMovement={handleRegisterStockMovement}
-                            stockMovements={stockMovements}
-                            isLoadingMovements={isLoadingMovements}
-                            formatTimestamp={formatFirestoreTimestamp}
-                        />} 
-            />
-            <Route path="/finances" element={<FinancesPage />} />
+            <Route path="/" element={currentUser ? <Navigate replace to="/dashboard" /> : <Navigate replace to="/login" />} />
+            <Route path="/login" element={!currentUser ? <LoginPage onLogin={handleLogin} /> : <Navigate replace to="/dashboard" />} />
+            <Route path="/register" element={!currentUser ? <RegisterPage onRegister={handleRegister} /> : <Navigate replace to="/dashboard" />} />
+            
+            <Route element={<ProtectedRoute currentUser={currentUser} />}>
+                <Route path="/dashboard" element={<DashboardPage financialMetrics={financialMetrics} products={products} stockMovements={stockMovements} categories={categories}/>} />
+                <Route path="/products" element={<ProductsPage onOpenAddProductModal={openAddProductModal} categories={categories} products={filteredProducts} isLoading={isLoadingProducts} formatTimestamp={formatFirestoreTimestamp} onEditProduct={openAddProductModal} onDeleteProduct={handleDeleteProduct} onViewDetails={handleViewDetails} searchTerm={searchTerm} setSearchTerm={setSearchTerm} selectedCategoryFilter={selectedCategoryFilter} setSelectedCategoryFilter={setSelectedCategoryFilter}/>} />
+                <Route path="/stock-movements" element={<StockMovementsPage products={products} onRegisterStockMovement={handleRegisterStockMovement} stockMovements={stockMovements} isLoadingMovements={isLoadingMovements} formatTimestamp={formatFirestoreTimestamp}/>} />
+                <Route path="/finances" element={<FinancesPage financialMetrics={financialMetrics} products={products} stockMovements={stockMovements}/>} />
+                <Route 
+                    path="/profile" 
+                    element={<ProfilePage 
+                                currentUser={currentUser} 
+                                auth={auth} 
+                                db={db} 
+                            />} 
+                />
+            </Route>
           </Routes>
         </main>
         <Footer />
       </div>
-      <AddProductModal 
-        isOpen={isAddProductModalOpen} 
-        onClose={closeAddProductModal}
-        onOpenAddCategoryModal={openAddCategoryModal}
-        categories={categories} 
-        onSaveProduct={handleSaveProduct}
-        productToEdit={productToEdit} 
-        CLOUDINARY_UPLOAD_URL={`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`}
-        CLOUDINARY_UPLOAD_PRESET={CLOUDINARY_UPLOAD_PRESET}
-      />
-      <AddCategoryModal 
-        isOpen={isAddCategoryModalOpen} 
-        onClose={closeAddCategoryModal}
-        onSaveCategory={handleSaveCategory} 
-      />
-     {modalMessage.isOpen && (
+      
+      <AddProductModal isOpen={isAddProductModalOpen} onClose={closeAddProductModal} onOpenAddCategoryModal={openAddCategoryModal} categories={categories} onSaveProduct={handleSaveProduct} productToEdit={productToEdit} CLOUDINARY_UPLOAD_URL={`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`} CLOUDINARY_UPLOAD_PRESET={CLOUDINARY_UPLOAD_PRESET}/>
+      <AddCategoryModal isOpen={isAddCategoryModalOpen} onClose={closeAddCategoryModal} onSaveCategory={handleSaveCategory} />
+      
+      {modalMessage.isOpen && (
          <div id="modal" className="modal" style={{display: 'block'}}> 
              <div className="modal-content modal-sm">
                  <span className="close-button" onClick={closeGenericMessageModal}>&times;</span>

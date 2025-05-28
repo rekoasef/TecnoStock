@@ -26,11 +26,6 @@ const ProductsPage = ({
         setSelectedCategoryFilter(event.target.value);
     };
 
-    // El botón "Filtrar" es opcional si los filtros se aplican en tiempo real.
-    // Si quieres un botón explícito, su onClick podría llamar a una función que fuerce
-    // el re-cálculo de filteredProducts, aunque useMemo ya lo hace si cambian las dependencias.
-    // Por ahora, lo dejaremos como está; los filtros se aplican al cambiar el input/select.
-
     return (
         <section id="products-section" className="content-section">
             <h2>Gestión de Productos</h2>
@@ -38,7 +33,10 @@ const ProductsPage = ({
                 <button 
                     id="open-add-product-modal-btn" 
                     className="btn btn-success" 
-                    onClick={onOpenAddProductModal}
+                    // --- CORRECCIÓN AQUÍ ---
+                    // Envolvemos la llamada en una función de flecha para asegurar
+                    // que onOpenAddProductModal se llama sin argumentos (o con null por defecto en App.jsx)
+                    onClick={() => onOpenAddProductModal()} 
                 >
                     ⊕ Nuevo Producto
                 </button>
@@ -63,8 +61,6 @@ const ProductsPage = ({
                         <option key={cat.id || cat.name} value={cat.name}>{cat.name}</option>
                     ))}
                 </select>
-                {/* El botón filtrar es opcional si se aplica en tiempo real */}
-                {/* <button id="apply-product-filters-btn" className="btn">Filtrar</button> */}
             </div>
             <hr style={{ margin: '20px 0', borderColor: 'var(--border-color)' }} />
             <h3>Listado de Productos</h3>
